@@ -51,7 +51,7 @@ Le projet n’a pas de dépendances npm à installer.
 ### Déployer le projet
 
 ```bash
-git clone <url-du-depot-gitlab> pick-my-next
+git clone https://github.com/RomSom75/pick-my-next.git pick-my-next
 cd pick-my-next
 ```
 
