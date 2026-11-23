@@ -33,7 +33,7 @@ Le configurateur permet de vérifier les clés, de créer plusieurs catalogues e
 
 La clé MDBList est disponible dans [les préférences MDBList](https://mdblist.com/preferences/). Pour TMDb, Pick My Next accepte une clé API v3 ou un Read Access Token v4.
 
-Les clés sont enregistrées dans `data/config.json` lorsque la configuration est sauvegardée. Ce fichier est exclu de Git.
+Les clés ne sont jamais enregistrées dans un fichier. Le configurateur génère une URL personnelle contenant une configuration chiffrée. La variable `PICK_SECRET` doit rester stable sur le serveur pour que cette URL continue à fonctionner après un redémarrage.
 
 ## Déploiement Hostinger
 
@@ -67,9 +67,10 @@ MDBLIST_API_KEY=ta_cle_mdblist
 MDBLIST_LIST_IDS=
 TMDB_READ_TOKEN=ta_cle_tmdb
 TMDB_LANGUAGE=fr-FR
+PICK_SECRET=une longue valeur aleatoire
 ```
 
-Le dossier `data/` doit être accessible en écriture par l’application.
+`PICK_SECRET` doit être conservé dans les variables Hostinger. Ne pas le modifier après avoir généré des URLs d’installation.
 
 ### Sous-domaine HTTPS
 
@@ -87,7 +88,7 @@ Réponse attendue :
 {"ok":true,"service":"pick-my-next"}
 ```
 
-Ouvrir ensuite `https://pick.example.com/configure`, vérifier les deux connexions, créer les catalogues et ajouter `https://pick.example.com/manifest.json` dans Nuvio.
+Ouvrir ensuite `https://pick.example.com/configure`, vérifier les deux connexions, créer les catalogues et copier l’URL personnelle générée dans Nuvio. Elle ressemble à `https://pick.example.com/u/<token>/manifest.json`.
 
 ## Endpoints
 

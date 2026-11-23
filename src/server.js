@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
-import { randomBytes } from 'node:crypto';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { MDBListClient } from './mdblist.js';
 import { TMDBClient } from './tmdb.js';
 import { normalizeListItems, watchedEpisodeSet, eligibleShows, randomPick } from './selection.js';
@@ -13,10 +13,10 @@ try {
   }
 } catch {}
 const env=process.env, port=Number(env.PORT||7000), cache={at:0, eligible:[], pick:null};
-const configFile = new URL('../data/config.json', import.meta.url);
-let savedConfig = {};
-try { savedConfig = JSON.parse(readFileSync(configFile, 'utf8')); } catch {}
-const getConfig = () => ({ ...savedConfig, mdblistApiKey: savedConfig.mdblistApiKey || env.MDBLIST_API_KEY, tmdbReadToken: savedConfig.tmdbReadToken || env.TMDB_READ_TOKEN, listIds: savedConfig.listIds || env.MDBLIST_LIST_IDS });
+const secretKey = createHash('sha256').update(env.PICK_SECRET || 'change-this-before-production').digest();
+function encodeConfig(config) { const iv=randomBytes(12); const cipher=createCipheriv('aes-256-gcm',secretKey,iv); const encrypted=Buffer.concat([cipher.update(JSON.stringify(config),'utf8'),cipher.final()]); return Buffer.concat([iv,cipher.getAuthTag(),encrypted]).toString('base64url'); }
+function decodeConfig(token) { try { const raw=Buffer.from(token,'base64url'); const decipher=createDecipheriv('aes-256-gcm',secretKey,raw.subarray(0,12)); decipher.setAuthTag(raw.subarray(12,28)); return JSON.parse(Buffer.concat([decipher.update(raw.subarray(28)),decipher.final()]).toString('utf8')); } catch { return null; } }
+const getConfig = token => { const decoded=token ? decodeConfig(token) : null; return decoded || {mdblistApiKey:env.MDBLIST_API_KEY,tmdbReadToken:env.TMDB_READ_TOKEN,listIds:env.MDBLIST_LIST_IDS}; };
 const json=(res,status,body)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','access-control-allow-origin':'*'});res.end(JSON.stringify(body));};
 const page = (req) => `<!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -34,9 +34,9 @@ async function loadPick(){const r=await fetch(base+'/catalog/series/pick-next.js
 async function draw(){document.querySelector('#pick').innerHTML='<p>Recherche en cours…</p>';const r=await fetch(base+'/api/draw',{method:'POST'});const j=await r.json();if(!r.ok) return document.querySelector('#pick').innerHTML='<p>'+esc(j.error)+'</p>';show(j.pick)}
 function copyManifest(){navigator.clipboard?.writeText(base+'/manifest.json');}
 </script></body></html>`;
-async function compute(listOverride){
+async function compute(listOverride, configToken){
   if(Date.now()-cache.at<60_000 && cache.eligible.length) return cache.eligible;
-  const cfg=getConfig();
+  const cfg=getConfig(configToken);
   if(!cfg.mdblistApiKey || !cfg.tmdbReadToken) throw new Error('Connecte MDBList et configure le jeton TMDb avant de charger le catalogue.');
   const md=new MDBListClient(cfg.mdblistApiKey), tm=new TMDBClient(cfg.tmdbReadToken,env.TMDB_LANGUAGE||'fr-FR');
   const lists=await Promise.all((listOverride || cfg.listIds || '').split(',').map(x=>x.trim()).filter(Boolean).map(x=>md.listItems(x)));
@@ -56,14 +56,18 @@ const server=createServer(async (req,res)=>{try{
   const u=new URL(req.url,`http://${req.headers.host}`);
   if(req.method==='GET'&&u.pathname==='/') {res.writeHead(200,{'content-type':'text/html; charset=utf-8'});return res.end(connectedConfigPage());}
   if(req.method==='GET'&&u.pathname==='/health') return json(res,200,{ok:true,service:'pick-my-next'});
+  const tokenMatch=u.pathname.match(/^\/u\/([^/]+)\/manifest\.json$/);
+  const catalogToken=u.pathname.match(/^\/u\/([^/]+)\/catalog\/series\/pick-next\.json$/)?.[1];
+  if(req.method==='GET'&&tokenMatch) return json(res,200,{...manifest,manifestUrl:`${u.origin}/u/${tokenMatch[1]}/manifest.json`,catalogs:[{type:'series',id:'pick-next',name:'Pick My Next',extra:{token:tokenMatch[1]}}]});
+  if(req.method==='GET'&&catalogToken){const eligible=await compute(undefined,catalogToken);if(!cache.pick)cache.pick=randomPick(eligible);return json(res,200,{metas:cache.pick?[{id:`tmdb:${cache.pick.id}`,type:'series',name:cache.pick.title,poster:cache.pick.poster,description:`Prochaine saison : S${cache.pick.season} (${cache.pick.remaining} épisode(s) restant(s))`}]:[]});}
   if(req.method==='GET'&&u.pathname==='/manifest.json') return json(res,200,manifest);
   if(req.method==='POST'&&u.pathname==='/api/config') {
     let body=''; for await (const chunk of req) body += chunk;
     const input=JSON.parse(body || '{}');
     if(!input.mdblistApiKey || !input.tmdbReadToken || !input.listIds) return json(res,400,{error:'Renseigne la clé MDBList, le jeton TMDb et au moins une liste.'});
-    savedConfig={mdblistApiKey:String(input.mdblistApiKey).trim(),tmdbReadToken:String(input.tmdbReadToken).trim(),listIds:String(input.listIds).trim(),groups:Array.isArray(input.groups)?input.groups:[]};
-    mkdirSync(new URL('../data/', import.meta.url),{recursive:true}); writeFileSync(configFile,JSON.stringify(savedConfig,null,2),'utf8'); cache.at=0; cache.eligible=[]; cache.pick=null;
-    return json(res,200,{ok:true});
+    const token=encodeConfig({mdblistApiKey:String(input.mdblistApiKey).trim(),tmdbReadToken:String(input.tmdbReadToken).trim(),listIds:String(input.listIds).trim(),groups:Array.isArray(input.groups)?input.groups:[]});
+    cache.at=0; cache.eligible=[]; cache.pick=null;
+    return json(res,200,{ok:true,installUrl:`${u.origin}/u/${token}/manifest.json`});
   }
   if(req.method==='POST'&&u.pathname==='/api/check') {
     let body=''; for await (const chunk of req) body += chunk;
@@ -75,7 +79,7 @@ const server=createServer(async (req,res)=>{try{
   }
   if(req.method==='POST'&&u.pathname==='/api/list-info') {
     let body=''; for await (const chunk of req) body += chunk;
-    const input=JSON.parse(body || '{}'); const cfg=getConfig();
+    const input=JSON.parse(body || '{}'); const cfg=getConfig(input.token);
     const apiKey=input.apiKey || cfg.mdblistApiKey;
     if(!apiKey || !input.list) return json(res,400,{error:'Clé MDBList ou liste manquante.'});
     try { const info=await new MDBListClient(apiKey).listInfo(input.list); const name=info.name || info.title || info.list_name || info.display_name || info.list?.name || info.list?.title || info.data?.name || info.data?.title; if(!name) return json(res,422,{error:'MDBList a répondu sans nom de liste.',rawKeys:Object.keys(info)}); return json(res,200,{name,id:input.list}); }
@@ -83,7 +87,7 @@ const server=createServer(async (req,res)=>{try{
   }
   if(req.method==='GET'&&u.pathname==='/catalog/series/pick-next.json'){const eligible=await compute(u.searchParams.get('lists') || undefined); if(!cache.pick) cache.pick=randomPick(eligible); return json(res,200,{metas:cache.pick?[{id:`tmdb:${cache.pick.id}`,type:'series',name:cache.pick.title,poster:cache.pick.poster,description:`Prochaine saison : S${cache.pick.season} (${cache.pick.remaining} épisode(s) restant(s))`}]:[]});}
   if(req.method==='POST'&&u.pathname==='/api/draw'){cache.pick=null; const e=await compute(); cache.pick=randomPick(e); return json(res,200,{pick:cache.pick});}
-  if(req.method==='GET'&&u.pathname==='/configure') {res.writeHead(200,{'content-type':'text/html; charset=utf-8'});return res.end(polishedConfigPage());}
+  if(req.method==='GET'&&u.pathname==='/configure') {res.writeHead(200,{'content-type':'text/html; charset=utf-8'});const extra=`<script>window.save=async function(){const groups=[...document.querySelectorAll('.group')].map(g=>({name:g.querySelector('.group-name').value.trim(),listIds:[...g.querySelectorAll('.source-input')].map(x=>x.value.trim()).filter(Boolean)})).filter(g=>g.listIds.length);const ids=[...new Set(groups.flatMap(g=>g.listIds))];if(!ids.length){document.querySelector('#out').textContent='Ajoute au moins une source MDBList.';return}const r=await fetch('/api/config',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mdblistApiKey:document.querySelector('#key').value,tmdbReadToken:document.querySelector('#tmdb').value,listIds:ids.join(','),groups})});const j=await r.json();document.querySelector('#out').innerHTML=r.ok?'URL d’installation personnelle :<br><br><code>'+j.installUrl+'</code><br><br>Copie cette URL dans Nuvio.':'Erreur : '+j.error}</script>`;return res.end(polishedConfigPage().replace('</body>',extra+'</body>'));}
   return json(res,404,{error:'not_found'});
 }catch(e){return json(res,500,{error:e.message});}});
 server.on('error', error => {
