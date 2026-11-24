@@ -17,7 +17,7 @@ export function chooseNextSeason(show, watched, now = new Date()) {
     const aired = episodes.every(e => e.air_date && new Date(e.air_date) <= now);
     if (!aired) return null;
     const complete = episodes.every(e => watched.has(`${show.id}:${n}:${Number(e.episode_number ?? e.episode ?? e.number)}`));
-    if (!complete) return { season: n, remaining: episodes.filter(e => !watched.has(`${show.id}:${n}:${Number(e.episode_number ?? e.episode ?? e.number)}`)).length };
+    if (!complete) { const next=episodes.find(e=>!watched.has(`${show.id}:${n}:${Number(e.episode_number ?? e.episode ?? e.number)}`)); return { season: n, episode:Number(next.episode_number ?? next.episode ?? next.number), episodeTitle:next.name || next.title, airDate:next.air_date, remaining: episodes.filter(e => !watched.has(`${show.id}:${n}:${Number(e.episode_number ?? e.episode ?? e.number)}`)).length }; }
   }
   return null;
 }
