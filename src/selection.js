@@ -18,7 +18,7 @@ export function chooseNextSeason(show, watched, now = new Date()) {
     if (!aired) return null;
     const watchedCount=episodes.filter(e => watched.has(`${show.id}:${n}:${Number(e.episode_number ?? e.episode ?? e.number)}`)).length;
     if (watchedCount > 0 && watchedCount < episodes.length) return null;
-    if (watchedCount === 0) { const next=episodes[0]; return { season: n, episode:Number(next.episode_number ?? next.episode ?? next.number), episodeTitle:next.name || next.title, airDate:next.air_date, remaining: episodes.length }; }
+    if (watchedCount === 0) { const next=episodes[0]; return { season: n, episode:Number(next.episode_number ?? next.episode ?? next.number), episodeTitle:next.name || next.title, episodeThumbnail:next.still_path, airDate:next.air_date, remaining: episodes.length }; }
   }
   return null;
 }
