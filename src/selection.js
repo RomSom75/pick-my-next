@@ -16,8 +16,9 @@ export function chooseNextSeason(show, watched, now = new Date()) {
     if (!episodes.length) continue;
     const aired = episodes.every(e => e.air_date && new Date(e.air_date) <= now);
     if (!aired) return null;
-    const complete = episodes.every(e => watched.has(`${show.id}:${n}:${Number(e.episode_number ?? e.episode ?? e.number)}`));
-    if (!complete) { const next=episodes.find(e=>!watched.has(`${show.id}:${n}:${Number(e.episode_number ?? e.episode ?? e.number)}`)); return { season: n, episode:Number(next.episode_number ?? next.episode ?? next.number), episodeTitle:next.name || next.title, airDate:next.air_date, remaining: episodes.filter(e => !watched.has(`${show.id}:${n}:${Number(e.episode_number ?? e.episode ?? e.number)}`)).length }; }
+    const watchedCount=episodes.filter(e => watched.has(`${show.id}:${n}:${Number(e.episode_number ?? e.episode ?? e.number)}`)).length;
+    if (watchedCount > 0 && watchedCount < episodes.length) return null;
+    if (watchedCount === 0) { const next=episodes[0]; return { season: n, episode:Number(next.episode_number ?? next.episode ?? next.number), episodeTitle:next.name || next.title, airDate:next.air_date, remaining: episodes.length }; }
   }
   return null;
 }
@@ -29,7 +30,7 @@ export function eligibleShows(listItems, details, watchedByShow, now = new Date(
     const show = details.get(id);
     if (!id || !show) continue;
     const next = chooseNextSeason({ ...show, id }, watchedByShow.get(id) || new Set(), now);
-    if (next) result.push({ id, title: item.title || show.name, poster: item.poster || show.poster_path, year: item.year || show.first_air_date?.slice(0,4), ...next });
+    if (next) result.push({ id, title: item.title || show.name, poster: item.poster || show.poster_path, backdrop: show.backdrop_path, year: item.year || show.first_air_date?.slice(0,4), ...next });
   }
   return result;
 }
